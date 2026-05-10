@@ -36,7 +36,7 @@ use crate::place::{
     module_type_implicit_global_declaration, module_type_implicit_global_symbol, place,
     place_from_bindings, place_from_declarations, typing_extensions_symbol,
 };
-use crate::reachability::ReachabilityConstraintsExtension;
+use crate::reachability::{ReachabilityConstraintsExtension, binding_reachability};
 use crate::types::add_inferred_python_version_hint_to_diagnostic;
 use crate::types::call::bind::{MatchingOverloadIndex, keyword_argument_context};
 use crate::types::call::{Binding, Bindings, CallArguments, CallError, CallErrorKind};
@@ -7068,11 +7068,26 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
 
         for bindings in use_def.multi_bindings_at_use(keyword.scoped_use_id(db, self.scope())) {
             let place = place_from_bindings(db, bindings.clone());
-            let Some(definition) = place.first_definition else {
+            let Some(first_definition) = place.first_definition else {
                 continue;
             };
-            let Some(key) = self.kwargs_definition_key(definition) else {
+            let Some(key) = self.kwargs_definition_key(first_definition) else {
                 continue;
+            };
+            let single_definition = {
+                let mut definitions = bindings.filter_map(|binding| {
+                    binding_reachability(db, use_def, &binding)
+                        .may_be_true()
+                        .then_some(binding.binding)
+                        .and_then(DefinitionState::definition)
+                });
+                let definition = definitions.next();
+
+                if definitions.next().is_some() {
+                    None
+                } else {
+                    definition
+                }
             };
 
             if let Place::Defined(DefinedPlace {
@@ -7081,8 +7096,10 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
                 ..
             }) = place.place
             {
-                let field_ty = self
-                    .contextualized_kwargs_field_type(definition, &key, expected_fields)
+                let field_ty = single_definition
+                    .and_then(|definition| {
+                        self.contextualized_kwargs_field_type(definition, &key, expected_fields)
+                    })
                     .unwrap_or(ty);
                 elements.push((key, field_ty));
             }
@@ -7153,7 +7170,12 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         let expected_fields = expected_fields?;
         let value = match definition.kind(self.db()) {
             DefinitionKind::DictKeyAssignment(assignment) => assignment.value(self.module()),
-            DefinitionKind::Assignment(assignment) => assignment.value(self.module()),
+            DefinitionKind::Assignment(assignment) => {
+                if !matches!(assignment.target_kind(), TargetKind::Single) {
+                    return None;
+                }
+                assignment.value(self.module())
+            }
             DefinitionKind::AnnotatedAssignment(assignment) => assignment.value(self.module())?,
             _ => return None,
         };

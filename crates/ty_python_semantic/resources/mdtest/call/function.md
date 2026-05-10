@@ -1732,6 +1732,20 @@ def invalid_headers() -> None:
     }
     with_headers(**kwargs)  # error: [invalid-argument-type]
 
+def expects_ints(*, x: list[int]) -> None: ...
+def branching_subscript(flag: bool) -> None:
+    kwargs = {}
+    if flag:
+        kwargs["x"] = []
+    else:
+        kwargs["x"] = ["s"]
+    expects_ints(**kwargs)  # error: [invalid-argument-type]
+
+def destructuring_subscript() -> None:
+    kwargs = {}
+    kwargs["x"], _ = [], 1
+    expects_ints(**kwargs)
+
 class InputMessage(TypedDict):
     role: Literal["user"]
     content: str
