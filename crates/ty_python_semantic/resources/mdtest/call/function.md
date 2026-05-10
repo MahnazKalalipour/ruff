@@ -1748,4 +1748,13 @@ def ok(content: str) -> None:
         "input": [{"role": "user", "content": content}],
     }
     reveal_type(create(**kwargs))  # revealed: int
+
+def out_of_order(*, second: str, first: int, third: bool) -> None: ...
+def ok_out_of_order() -> None:
+    kwargs: dict[str, Any] = {
+        "first": 1,
+        "second": "s",
+        "third": True,
+    }
+    out_of_order(**kwargs)
 ```

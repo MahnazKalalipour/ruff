@@ -5223,19 +5223,59 @@ impl<'a, 'db> ArgumentTypeChecker<'a, 'db> {
         if let Some(unpacked_keys) =
             extract_unpacked_typed_dict_keys_from_value_type(self.db, argument_type)
         {
-            for (argument_type, parameter_index) in unpacked_keys
-                .values()
-                .map(|unpacked_key| unpacked_key.value_ty)
-                .zip(&self.argument_matches[argument_index].parameters)
-            {
-                self.check_argument_type(
-                    constraints,
-                    argument_index,
-                    adjusted_argument_index,
-                    argument,
-                    argument_type,
-                    *parameter_index,
-                );
+            let matched_parameters = self.argument_matches[argument_index]
+                .parameters
+                .iter()
+                .copied()
+                .collect::<Vec<_>>();
+            let matched_keyword_names = matched_parameters
+                .iter()
+                .filter_map(|parameter_index| {
+                    let parameter = &self.signature.parameters()[*parameter_index];
+                    if parameter.is_keyword_variadic() {
+                        None
+                    } else {
+                        parameter.keyword_name().cloned()
+                    }
+                })
+                .collect::<Vec<_>>();
+            let mut checked_keyword_variadic = false;
+
+            for parameter_index in matched_parameters {
+                let parameter = &self.signature.parameters()[parameter_index];
+
+                if parameter.is_keyword_variadic() {
+                    if checked_keyword_variadic {
+                        continue;
+                    }
+                    checked_keyword_variadic = true;
+
+                    for (name, unpacked_key) in &unpacked_keys {
+                        if matched_keyword_names.contains(name) {
+                            continue;
+                        }
+
+                        self.check_argument_type(
+                            constraints,
+                            argument_index,
+                            adjusted_argument_index,
+                            argument,
+                            unpacked_key.value_ty,
+                            parameter_index,
+                        );
+                    }
+                } else if let Some(name) = parameter.keyword_name()
+                    && let Some(unpacked_key) = unpacked_keys.get(name)
+                {
+                    self.check_argument_type(
+                        constraints,
+                        argument_index,
+                        adjusted_argument_index,
+                        argument,
+                        unpacked_key.value_ty,
+                        parameter_index,
+                    );
+                }
             }
 
             return;

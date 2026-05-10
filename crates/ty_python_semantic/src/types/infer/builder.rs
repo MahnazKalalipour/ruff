@@ -7044,11 +7044,15 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         Type::function_like_callable(self.db(), Signature::new(parameters, return_ty))
     }
 
-    /// Attempt to narrow a splatted dictionary argument based on the narrowed types of individual
-    /// keys, if any.
+    /// Attempt to narrow a `**kwargs` dictionary using known string-literal fields.
     ///
-    /// Returns the intersection between the dictionary type and a synthesized `__getitem__`
-    /// protocol for any narrowed keys, or `None` otherwise.
+    /// When `expected_fields` is present, fresh dictionary literal fields can be inferred with
+    /// matched keyword parameter types:
+    ///
+    /// ```py
+    /// kwargs: dict[str, Any] = {"input": [{"role": "user", "content": content}]}
+    /// create(**kwargs)
+    /// ```
     fn try_narrow_dict_kwargs(
         &mut self,
         argument_type: Type<'db>,
@@ -7159,6 +7163,7 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         ))
     }
 
+    /// Extract the statically known string key for a `**kwargs` dictionary field definition.
     fn kwargs_definition_key(&self, definition: Definition<'db>) -> Option<Name> {
         let key = match definition.kind(self.db()) {
             DefinitionKind::DictKeyAssignment(assignment) => assignment.key(self.module()),
@@ -7174,6 +7179,12 @@ impl<'db, 'ast> TypeInferenceBuilder<'db, 'ast> {
         Some(Name::new(key.as_string_literal_expr()?.value.to_str()))
     }
 
+    /// Re-infer a fresh dictionary literal field with its matched keyword parameter type.
+    ///
+    /// ```py
+    /// kwargs: dict[str, Any] = {"input": [{"role": "user", "content": content}]}
+    /// create(**kwargs)
+    /// ```
     fn contextualized_kwargs_field_type(
         &mut self,
         definition: Definition<'db>,
